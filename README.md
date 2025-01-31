@@ -11,4 +11,5 @@ To make different LLMs play The Chameleon, run TestLlms.py . Note that you need 
 PlotInfoGains.py generates a figure like Figure 7 of the paper. You first need to compute the posterior probabilities by running the ComputeInfoGains.py. Note that ComputeInfoGains.py requires a Google Custom Search Engine ID and a Google Search API key.
 
 Gameplay
-![gameplay](https://github.com/user-attachments/assets/c1669aed-1858-4570-8f49-a7fc278223eb =600x)
+
+<img src="https://github.com/user-attachments/assets/c1669aed-1858-4570-8f49-a7fc278223eb" alt="drawing" width="600"/>
