@@ -1,5 +1,5 @@
 # LLMChameleon
-Repository for the paper "Do LLMs Strategically Reveal, Conceal, and Infer Information?  A Theoretical and Empirical Analysis in The Chameleon Game" [Paper link] . This repository contains gameplay code to make different LLMs play The Chameleon.
+Repository for the paper "Do LLMs Strategically Reveal, Conceal, and Infer Information?  A Theoretical and Empirical Analysis in The Chameleon Game" [Paper link](http://arxiv.org/abs/2501.19398). This repository contains gameplay code to make different LLMs play The Chameleon.
 
 The Chameleon is a commercial board game. **Please buy the game at [bigpotato.com/products/the-chameleon](bigpotato.com/products/the-chameleon)** . 
 We provide a single game card to demonstrate the gameplay with LLMs. You can populate ChameleonCards.py with additional cards.
