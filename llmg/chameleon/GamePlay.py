@@ -1,14 +1,22 @@
 import pickle
-
-
-
 import random
 import numpy as np
-from NaturalLanguageTalker.naturallanguagetalker import NaturalLanguageTalker
-from AbstractTalker.SCoRe.SCoRe import SCoRe
 import re
-from AbstractTalker.SCoRe.SCoRe import SCoRe
-import WebSearcher.WebSearcher as WS
+
+from llmg.chameleon.NaturalLanguageTalker.naturallanguagetalker import NaturalLanguageTalker
+from llmg.chameleon.constants import (
+    GAME_START_PROMPT,
+    DISTRIBUTE_INDICES_PROMPT,
+    DISTRIBUTE_CHAMELEON_IDENTITY_PROMPT,
+    DISTRIBUTE_NON_CHAMELEON_IDENTITY_PROMPT,
+    DISTRIBUTE_CATEGORY_PROMPT,
+    RESPOND_PROMPT,
+    HEAR_NEXT_RESPONSES_PROMPT,
+    VOTE_PROMPT,
+    EXPLAIN_VOTE_PROMPT,
+    ASK_DEALER_PROMPT,
+    CHAMELEON_SECOND_CHANCE_PROMPT
+)
 
 
 class GamePlay():
@@ -18,39 +26,87 @@ class GamePlay():
     # 'IdentifiedLoss' the chameleon was correctly identified but correctly guessed the secret word
     # 'IdentifiedWin' the chameleon was correctly identified and did not correctly guess the secret word
 
-
-
-    def __init__(self, players: list[NaturalLanguageTalker], chameleon_index : int = None, num_of_possible_words : int = 16):
-        #Initialize the game
+    def __init__(
+        self,
+        players,
+        chameleon_cards_path,
+        chameleon_index=None,
+        num_of_possible_words=16,
+        init_from_ckpt=None,
+        nonchameleons_response_word_instruction=None, # additional instructions for non-chameleons to give a response word
+    ):
+        # Initialize the game
         self.players = players
         self.num_of_players = len(players)
-        with open('ChameleonCards.pkl', 'rb') as f:
+        with open(chameleon_cards_path, 'rb') as f:
             self.cards = pickle.load(f)
-        self.category = random.sample(list(self.cards.keys()), 1)[0]
-        random.shuffle(self.cards[self.category])
-        self.possible_words = self.cards[self.category][:num_of_possible_words]
-        self.secret_word = random.sample(self.possible_words, 1)[0]
+        self.nonchameleons_response_word_instruction = nonchameleons_response_word_instruction
+        params_loaded_from_ckpt = []
 
-        #Randomly assign the chameleon if it is not given
+        # Category
+        if init_from_ckpt is not None and "category" in init_from_ckpt:
+            self.category = init_from_ckpt['category']
+            params_loaded_from_ckpt.append('category')
+        else:
+            # Initialize the game state randomly
+            self.category = random.sample(list(self.cards.keys()), 1)[0]
+        
+        # Possible words
+        if init_from_ckpt is not None and "possible_words" in init_from_ckpt:
+            self.possible_words = init_from_ckpt['possible_words']
+            params_loaded_from_ckpt.append('possible_words')
+        else:
+            random.shuffle(self.cards[self.category])
+            self.possible_words = self.cards[self.category][:num_of_possible_words]
+
+        # Secret word
+        if init_from_ckpt is not None and "secret_word" in init_from_ckpt:
+            self.secret_word = init_from_ckpt['secret_word']
+            params_loaded_from_ckpt.append('secret_word')
+        else:
+            self.secret_word = random.sample(self.possible_words, 1)[0]
+
+        # Chameleon index
         if chameleon_index is None:
-            self.chameleon_index = random.sample(range(len(self.players)), 1)[0]
+            if init_from_ckpt is not None and "chameleon_index" in init_from_ckpt:
+                self.chameleon_index = init_from_ckpt['chameleon_index']
+                params_loaded_from_ckpt.append('chameleon_index')
+            else:
+                # Randomly assign the chameleon if it is not given
+                self.chameleon_index = random.sample(range(len(self.players)), 1)[0]
         else:
             self.chameleon_index = chameleon_index
 
-        #Random voting order. Does not make a difference for simultaneous voting.
-        self.vote_order = np.arange(self.num_of_players)
-        np.random.shuffle(self.vote_order)
+        # Voting order
+        self.vote_order = None
+        if init_from_ckpt is not None and ("vote_order" in init_from_ckpt or "votes" in init_from_ckpt):
+            if init_from_ckpt.get("vote_order") is None:
+                if init_from_ckpt.get("votes") is not None:
+                    self.vote_order = list(init_from_ckpt["votes"].keys())
+            else:
+                self.vote_order = init_from_ckpt["vote_order"]
+        if self.vote_order is None:
+            # Random voting order. Does not make a difference for simultaneous voting.
+            self.vote_order = np.arange(self.num_of_players)
+            np.random.shuffle(self.vote_order)
+        else:
+            params_loaded_from_ckpt.append('vote_order')
 
-        #Dealer to give a tiebraking response
-        self.dealer_index = random.randint(0, self.num_of_players-1)
+        # Dealer index
+        if init_from_ckpt is not None and "dealer_index" in init_from_ckpt:
+            self.dealer_index = init_from_ckpt['dealer_index']
+            params_loaded_from_ckpt.append('dealer_index')
+        else:
+            # Dealer to give a tiebraking response
+            self.dealer_index = random.randint(0, self.num_of_players - 1)
+        
+        print(f"Game initialized with parameters from checkpoint: {params_loaded_from_ckpt}")
 
-        #Variables for the gameplay
+        # Variables for the gameplay
         self.word_responses = None
         self.votes = None
         self.voted_chameleon = None
         self.chameleon_response = None
-
-
 
     def play(self):
         #Give the game instructions to the players. Players are expected to confirm with 'yes'.
@@ -90,12 +146,10 @@ class GamePlay():
         if not self.check_hear_next_words_responses(hear_next_words_responses):
             return 'Fail', self, 'Game aborted because one of the players said something after hearing the words. ', hear_next_words_responses
 
-
         #Players vote to catch the chameleon
         self.votes = self.vote()
         if not self.check_votes(self.votes):
             return 'Fail', self, 'Game aborted because one of the players gave an invalid vote. ', self.votes
-
 
         explanation_responses = self.explain()
         if not self.check_explanation_responses(explanation_responses):
@@ -113,12 +167,10 @@ class GamePlay():
             voted_chameleon = max_indices[0] - 1
         self.voted_chameleon = voted_chameleon + 1
 
-
-
         #Give the chameleon a second chance if it is caught and declare the game result.
         if voted_chameleon == self.chameleon_index:
             self.chameleon_response = self.ask_chameleon()
-            self.chameleon_response = re.sub('[^A-Za-z0-9]+', ' ', self.chameleon_response)
+            self.chameleon_response = re.sub('[^A-Za-z0-9-.]+', ' ', self.chameleon_response)
             self.chameleon_response = self.chameleon_response.rstrip()
             if not self.check_chameleon_response(self.chameleon_response):
                 return 'Fail', self, 'Game aborted because the chameleon did not give a valid response. ', self.chameleon_response
@@ -140,27 +192,7 @@ class GamePlay():
                 response = player.get_instructions(num_of_players=len(self.players))
             else:
                 #Gameplay
-                message = "You will play a game of Chameleon with " + str(len(self.players) - 1) + " other players. "
-                message = message + "The aim in this game is to unmask the Chameleon without giving away the secret word. "
-                message = message + "If you are the Chameleon then your mission is to blend in with the other players, avoid detection and work out the secret word. "
-                message = message + "One of the players will be randomly selected as the chameleon. "
-                message = message + "The chameleon will know its identity but not the secret word. "
-                message = message + "The other players will know the secret word but not the identity of the chameleon. "
-                message = message + "Each player (including the Chameleon) takes it in turns to say one word related to the secret word. Take a few moments to think of your word. "
-                message = message + "If another player says the word you were going to say, you can repeat it. Choose wisely!"
-                message = message + "If your word is too obvious, the Chameleon might catch on and figure out the secret word. If it’s too cryptic, people might start to think that you’re the Chameleon. "
-
-
-                #Instructions for only voting
-                message = message + "After all players have said their word, you will vote for who you think the Chameleon is. The player with the most votes will be revealed as the chameleon. "
-
-                #Instructions for winning conditions
-                message = message + "If the Chameleon is correctly revealed, they have one last chance to guess the secret word. If they guess correctly, they win. If not, the other players win. "
-                message = message + "If the Chameleon is not correctly revealed, they win. The other players lose. "
-
-                #Confirmation for the instructions
-                message = message + "Just say yes or no to confirm that you understand the rules of the game. Do not say anything else than yes or no. "
-
+                message = GAME_START_PROMPT.format(num_players=len(self.players) - 1)
                 response, prev_messages = player.send_message_get_response(message)
 
             responses[player_index] = response
@@ -172,41 +204,22 @@ class GamePlay():
         responses = dict()
         for player_index in range(self.num_of_players):
             player = self.players[player_index]
-            # Player order
-            if isinstance(player, SCoRe):
-                response = player.get_number(player_index + 1)
-            else:
-                message = "Let's start the game. You are player number " + str(player_index + 1) + " in the running order. "
-
-                # Wait for the identities
-                message = message + "Wait for the categories to be chosen. "
-
-                #Confirmation
-                message = message + "Just say your player number to confirm that you understood your running order. Do not say anything else other than the number. "
-                response, prev_messages = player.send_message_get_response(message)
+            message = DISTRIBUTE_INDICES_PROMPT.format(player_number=str(player_index + 1))
+            response, prev_messages = player.send_message_get_response(message)
             responses[player_index] = response
 
         return responses
-
-
 
     #Distribution of the identities. The non-chameleon players also get the secret word.
     def distribute_identities(self):
         responses = dict()
         for player_index in range(self.num_of_players):
             player = self.players[player_index]
-            if isinstance(player, SCoRe):
-                player_response = player.get_role()
-                if player_index is not self.chameleon_index:
-                    player.hear_secret_word(self.secret_word)
+            if player_index == self.chameleon_index:
+                message = DISTRIBUTE_CHAMELEON_IDENTITY_PROMPT
             else:
-                if player_index == self.chameleon_index:
-                    message = 'You are the chameleon. Wait for your turn to say your word.'
-                    message = message + 'To confirm that you understand your identity, say yes if you are the chameleon. Say no if you are not the chameleon. Do not say anything else. '
-                else:
-                    message = 'You are not the chameleon. The secret word is: ' + self.secret_word + '. Wait for your turn to say your word. '
-                    message = message + 'To confirm that you understand your identity, say yes if you are the chameleon. Say no if you are not the chameleon. Do not say anything else. '
-                player_response, prev_messages = player.send_message_get_response(message)
+                message = DISTRIBUTE_NON_CHAMELEON_IDENTITY_PROMPT.format(secret_word=self.secret_word)
+            player_response, prev_messages = player.send_message_get_response(message)
             responses[player_index] = player_response
 
         return responses
@@ -216,15 +229,10 @@ class GamePlay():
         responses = dict()
         for player_index in range(self.num_of_players):
             player = self.players[player_index]
-            if isinstance(player, SCoRe):
-                response = player.get_category(self.category, self.possible_words)
-            else:
-                message = "The category for this game is " + self.category + ". "
-                words = self.possible_words
-                words = ', '.join(words)
-                message = message + "The possible secret words are " + words + ". "
-                message = message + " Just say yes or no to confirm that you understand the category and possible secret words. Do not say anything else. "
-                response, prev_messages = player.send_message_get_response(message)
+            words = self.possible_words
+            words = ', '.join(words)
+            message = DISTRIBUTE_CATEGORY_PROMPT.format(category=self.category, possible_words=words)
+            response, prev_messages = player.send_message_get_response(message)
             responses[player_index] = response
 
         return responses
@@ -232,79 +240,47 @@ class GamePlay():
     #Distribute the previous players' responses to each player and get its response.
     def respond(self):
         responses = dict()
-        previous_responses = ''
         round_robin_message_list = []
         for player_index in range(self.num_of_players):
             player = self.players[player_index]
-            if isinstance(player, SCoRe):
-                player.hear_prev_responses([responses[i + 1] for i in range(player_index)])
-                player_response = player.respond()
-                responses[player_index + 1] = player_response
-                round_robin_message_list.append("Player " + str(player_index + 1) + " said " + player_response + ". ")
-            else:
-                message = ""
-                if player_index > 0:
-                    message = message + "Here are what the previous players said. " + ' '.join(round_robin_message_list)
-                message = message + "It is now your turn to say your word. If your word is too obvious, the Chameleon might catch on and figure out the secret word. If it’s too cryptic, people might start to think that you’re the Chameleon. Make sure that your response is a single word. What is your word?"
-                player_response, prev_messages = player.send_message_get_response(message)
-                player_response = re.sub('[^A-Za-z0-9]+', ' ', player_response)
-                responses[player_index + 1] = player_response
-                round_robin_message_list.append("Player " + str(player_index + 1) + " said " + player_response + ". ")
+            previous_responses = ''
+            if player_index > 0:
+                previous_responses = "Here are what the previous players said. " + ' '.join(round_robin_message_list)
+            instruction = ""
+            if player_index != self.chameleon_index and self.nonchameleons_response_word_instruction is not None:
+                instruction = self.nonchameleons_response_word_instruction
+            message = RESPOND_PROMPT.format(previous_words=previous_responses, instruction=instruction).strip()
+            player_response, prev_messages = player.send_message_get_response(message)
+            player_response = re.sub('[^A-Za-z0-9-.]+', ' ', player_response)
+            responses[player_index + 1] = player_response
+            round_robin_message_list.append("Player " + str(player_index + 1) + " said " + player_response + ".")
 
         return responses, round_robin_message_list
 
-
     def hear_next_responses(self, round_robin_message_list: list[str]):
         responses = dict()
-
-
         for player_index in range(self.num_of_players - 1):
             player = self.players[player_index]
-            if isinstance(player, SCoRe):
-                player_response = player.hear_next_responses([self.word_responses[i] for i in range(player_index + 2, self.num_of_players + 1)])
-            else:
-                message = "Here are the words that the next players said: " + ' '.join(round_robin_message_list[player_index+1: self.num_of_players])
-                message = message + "Do not say anything. Wait for the voting to begin. "
-                player_response = player.send_message_get_response(message)
-            responses[player_index] = player_response
-
+            message = HEAR_NEXT_RESPONSES_PROMPT.format(next_words=' '.join(round_robin_message_list[player_index + 1: self.num_of_players]))
+            player.add_message(message, send_with_next_message=True)
+            responses[player_index] = ""
         return responses
-
 
     def vote(self):
         self.votes = dict()
-
-
-
         for player_index in self.vote_order:
             player = self.players[player_index]
-            if isinstance(player, SCoRe):
-                player_response = player.vote()
-                self.votes[player_index] = player_response
-            else:
-                message = "It is now your turn to vote for who you think the Chameleon is. Remember that the chameleon does not know the secret word and the other players do. "
-                message = message + "If you are the chameleon, you can vote for another player to win the game."
-                message = message + "If you are not the chameleon, you are trying to identify the chameleon. "
-                message = message + "Who do you think the Chameleon is? Only give the player number. Do not say anything else."
-                player_vote, prev_messages = player.send_message_get_response(message)
-                self.votes[player_index] = player_vote
-
+            player_vote, prev_messages = player.send_message_get_response(VOTE_PROMPT)
+            self.votes[player_index] = player_vote
         return self.votes
 
     #Players give explanations for their reasoning
     def explain(self):
         self.explanations = dict()
-
         for player_index in self.vote_order:
             player = self.players[player_index]
-            if isinstance(player, SCoRe):
-                player_response = player.give_explanations()
-                self.explanations[player_index] = player_response
-            else:
-                message = "Explain your vote."
-                response = player.send_message_get_response(message, max_tokens=500)
-                self.explanations[player_index] = response
-
+            response, _ = player.send_message_get_response(EXPLAIN_VOTE_PROMPT, max_tokens=3000)
+            self.explanations[player_index] = response
         return self.explanations
 
     #The dealer gives a tiebraker response
@@ -312,22 +288,16 @@ class GamePlay():
         dealer = self.players[self.dealer_index]
         max_players = max_indices
         max_players = ', '.join(str(i) for i in max_players)
-        if isinstance(dealer, SCoRe):
-            response = dealer.give_dealer_response(max_indices)
-            return response
-        else:
-            message = "Players " + max_players + " received the most votes. "
-            message = message + "Who do you think the Chameleon is among Players " + max_players + "? Only give the player number. "
-            response, prev_messages = dealer.send_message_get_response(message)
-            response = re.sub('[^A-Za-z0-9]+', ' ', response)
-            numbers = [int(s) for s in response.split() if s.isdigit()]
-            response = numbers[0]
-            return response
-
+        message = ASK_DEALER_PROMPT.format(max_players=max_players)
+        response, prev_messages = dealer.send_message_get_response(message)
+        response = re.sub('[^A-Za-z0-9]+', ' ', response)
+        numbers = [int(s) for s in response.split() if s.isdigit()]
+        response = numbers[0] if len(numbers) > 0 else response
+        return response
 
     #Get the vote result
     def vote_results(self, votes:dict[int, str]):
-
+        # Count the votes
         vote_counts = dict()
         for voter in votes.keys():
             response = votes[voter]
@@ -339,7 +309,8 @@ class GamePlay():
             else:
                 vote_counts[vote] = 1
 
-
+        # Find the player with the most votes
+        # If there is a tie, return all players with the most votes
         max_num_votes = 0
         max_indices = []
         for player_index in vote_counts.keys():
@@ -354,16 +325,8 @@ class GamePlay():
     #Second chance for the chameleon
     def ask_chameleon(self):
         chameleon = self.players[self.chameleon_index]
-        if isinstance(chameleon, SCoRe):
-            chameleon_response = chameleon.give_chameleon_response()
-            return chameleon_response
-        else:
-            message = "You have been correctly identified as the Chameleon. "
-            message = message + "You have a last chance to win the game. What do you think the secret word is based on the other players responses and possible secret words? Say the exact word. Do not say antyhing else."
-            chameleon_response, prev_messages = chameleon.send_message_get_response(message)
+        chameleon_response, prev_messages = chameleon.send_message_get_response(CHAMELEON_SECOND_CHANCE_PROMPT)
         return chameleon_response
-
-
 
     def check_instruction_responses(self, instruction_responses: dict[int, str]):
         for player_index in instruction_responses.keys():
@@ -439,10 +402,9 @@ class GamePlay():
         return True
 
     def check_chameleon_response(self, chameleon_response):
-        chameleon_response = re.sub('[^A-Za-z0-9]+', ' ', chameleon_response)
+        chameleon_response = re.sub('[^A-Za-z0-9-.]+', ' ', chameleon_response)
         chameleon_response = chameleon_response.rstrip()
         for secret_word in self.possible_words:
             if secret_word in chameleon_response.lower():
                 return True
         return False
-

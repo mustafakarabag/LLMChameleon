@@ -1,0 +1,32 @@
+name: llmg
+channels:
+  - nvidia/label/cuda-12.6
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - nvidia::cudatoolkit=11.7
+  - python=3.11
+  - pip
+  - ipykernel
+  - ipython
+  - matplotlib=3.9.2
+  - numpy=1.26.4
+  - torchvision=0.22.0
+  - pip:
+    - torch==2.7.0
+    - torchvision==0.22.0
+    - accelerate==0.28.0
+    - transformers==4.51.3
+    - huggingface_hub==0.31.2
+    - lovely-tensors
+    - python-dotenv==1.1.0
+    - autoawq==0.2.9
+    - scikit-learn==1.4.0
+    - statsmodels==0.14.4
+    - scipy==1.13.1
+    - dill==0.3.8
+    - gpustat
+    - seaborn
+    - openai
+    - google-genai
