@@ -18,7 +18,7 @@ pip install -e .
 
 
 ## Running the code
-If you don't have have the original Chameleon game cards, or want to create new ones, use the notebook `new_categories.ipynb` in the `llmg/chameleon` folder. This notebook prompts GPT-4o to generate new categories and secret words, and saves them in `new_chameleon_cards_<timestamp>.pkl`. See the comments in the notebook for details. *(The Chameleon is a commercial board game which you can buy at [bigpotato.com/products/the-chameleon](bigpotato.com/products/the-chameleon))*
+If you don't have the original Chameleon game cards, or want to create new ones, use the notebook `new_categories.ipynb` in the `llmg/chameleon` folder. This notebook prompts GPT-4o to generate new categories and secret words, and saves them in `new_chameleon_cards_<timestamp>.pkl`. See the comments in the notebook for details. *(The Chameleon is a commercial board game which you can buy at [bigpotato.com/products/the-chameleon](https://bigpotato.com/products/the-chameleon))*
 
 The notebook `data_collection.ipynb` in the `llmg/chameleon` folder contains the code to run the experiments and collect data. The results will be saved in the directory specified by the `DATA_DIR` environment variable.
 
